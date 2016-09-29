@@ -1,0 +1,144 @@
+---
+title: 'Data Science: Practical Machine Learning - Project'
+author: "Jagannatha Reddy"
+date: "September 27, 2016"
+output: html_document
+---
+
+#### **Problem Description** 
+
+In this project we will be looking at a sensory data set from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the <a href="http://groupware.les.inf.puc-rio.br/har">groupware website</a>
+ (see the section on the Weight Lifting Exercise Dataset). The training data for this project is downloaded from <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv">cloudfront website</a> 
+ 
+In this project the following are the main focus items:
+
+1. Cleaning the data so that only relevant predictors play a role in model creation
+2. Build different models
+3. Validate the models against the training set and observe how accurate they are
+4. Predict the results for test set and validate the accuracy
+
+## Data Preparation
+
+```{r}
+cache=TRUE
+setwd("/Users/jagan/work/DataScience/PracticalMachineLearning/DataScience-PracticalMachineLearning-Project")
+trainingFile <- "data/pml-training.csv"
+testingFile  <- "data/pml-testing.csv"
+if (!file.exists(trainingFile)) {
+    dir.create("data", showWarnings = FALSE) #ignore Warning to recreate the directory
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile=trainingFile)
+}
+
+if (!file.exists(testingFile)) {
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile=testingFile)
+}
+trainData <- read.csv(file=trainingFile, stringsAsFactors = FALSE)
+testData  <- read.csv(file=testingFile, stringsAsFactors = FALSE)
+dim(trainData)
+```
+
+As you can see we only have have `r nrow(trainData[complete.cases(trainData),])` rows having the complete data but training set has `r ncol(trainData)` columns which is very high. Given this our goal is to identify only the columns which are relevant but at the same time have statistically significant data in generating the models. This means we have to selectively eliminate the columns without having to reduce the number of rows significantly
+
+As a first step we will eliminate the near zero variance predictors using carat::nearZeroVar function as they will not play any significant role in coming up with the right model
+
+```{r warning=FALSE, message=FALSE}
+library(lattice)
+library(ggplot2)
+library(caret)
+
+NZVColumns <- nearZeroVar(trainData)
+trainData  <- trainData[, -NZVColumns]
+testData  <- testData[, -NZVColumns]
+dim(trainData)
+```
+
+As you can see we could eliminate `r length(NZVColumns)` columns from the dataset as these columns wouldn't impact the model generation. However we will have `r ncol(trainData)` columns which is very high in predicting the right model and hence there is further scope for cleaning up the data. As a next step we would eliminate the colums which have very sparse data
+
+```{r warning=FALSE, message=FALSE}
+GoodColumn <- sapply(trainData, function(x) mean(!is.na(x))) > 0.95
+trainData <- trainData[, GoodColumn==TRUE]
+testData <- testData[, GoodColumn==TRUE]
+dim(trainData)
+trainData$classe <- as.factor(trainData$classe)
+```
+
+As you can see the first 5 columns (X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp) shouldn't play a role in model building and hence eliminating these columns too
+
+```{r warning=FALSE, message=FALSE}
+trainData <- trainData[, -c(1:5)]
+testData <- testData[, -c(1:5)]
+dim(trainData)
+```
+
+After this cleanup what we have left is with the complete cases and hence we can proceed with building the models
+
+## Build Models
+
+In this section we would build models based on random forest (“rf”), generalized boosted regression (“gbm”) and linear discriminant analysis (“lda”) models.
+
+```{r warning=FALSE, message=FALSE}
+set.seed(12345)
+inTrain  = createDataPartition(trainData$classe, p = 0.70)[[1]]
+training = trainData[inTrain,]
+testing  = trainData[-inTrain,]
+
+library(randomForest)
+library(gbm)
+library(lda)
+
+rfModel  <- train(classe~., data=training, method="rf", verbose=FALSE)
+gbmModel <- train(classe~., data=training, method="gbm", verbose=FALSE)
+ldaModel <- train(classe~., data=training, method="lda", verbose=FALSE)
+```
+
+## Model validation against training dataset
+
+In this section we would validate our models against the training dataset.
+
+```{r warning=FALSE, message=FALSE}
+rfPredictTrain  <- predict(rfModel, training)
+confusionMatrix(rfPredictTrain, training$classe)
+
+gbmPredictTrain <- predict(gbmModel, training)
+confusionMatrix(gbmPredictTrain, training$classe)
+
+ldaPredictTrain <- predict(ldaModel, training)
+confusionMatrix(ldaPredictTrain, training$classe)
+```
+
+Let's list out the accuracies of these models against the training dataset
+
+1. Accurary of randomforest model agaist training set: `r confusionMatrix(rfPredictTrain, training$classe)$overall[1]`
+1. Accurary of gbm model agaist training set: `r confusionMatrix(gbmPredictTrain, training$classe)$overall[1]`
+1. Accurary of lda model agaist training set: `r confusionMatrix(ldaPredictTrain, training$classe)$overall[1]`
+
+```{r}
+rfModel$finalModel
+```
+
+Based on this information its very clear that randomforest & gbm models accuracy is much superior than lda model. Looking at the Out-of-Bag (OOB) error of randomforest model its very clear that its an accurate model. However the complexity in building the randomforest model is higher compared to the other 2 models. When the prediction is built using tree model (method=rpart) the accuracy wasn't that good and not reported here.
+
+## Apply the model to the test dataset
+
+In this section we would validate our models against the training dataset.
+
+```{r warning=FALSE, message=FALSE}
+rfPredict  <- predict(rfModel, testing)
+confusionMatrix(rfPredict, testing$classe)
+
+gbmPredict <- predict(gbmModel, testing)
+confusionMatrix(gbmPredict, testing$classe)
+
+ldaPredict <- predict(ldaModel, testing)
+confusionMatrix(ldaPredict, testing$classe)
+```
+
+Let's list out the accuracies of these models against the test dataset
+
+1. Accurary of randomforest model agaist training set: `r confusionMatrix(rfPredict, testing$classe)$overall[1]`
+1. Accurary of gbm model agaist training set: `r confusionMatrix(gbmPredict, testing$classe)$overall[1]`
+1. Accurary of lda model agaist training set: `r confusionMatrix(ldaPredict, testing$classe)$overall[1]`
+
+#### **Executive Summary**
+
+Based on the analysis done on the activity data it is evident that **Random forest** model outperforms the **gbm** and **lda** models in terms of accuracy. However gbm model's performance is also very close to that of randomforest but not the better. These conclusions are based on the statistically significant dataset and hence the confidence is also higher
